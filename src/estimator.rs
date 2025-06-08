@@ -10,10 +10,10 @@ pub struct PatternEstimate {
 /// Checks if a character is valid in the Base58 alphabet
 pub fn is_base58_char(c: char) -> bool {
     // Base58 alphabet: 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
-    // Excluded: 0, O, I, l
+    // Excluded: 0 (zero), O (uppercase o), I (uppercase i), l (lowercase L)
     match c {
         '0' | 'O' | 'I' | 'l' => false,
-        '1'..='9' | 'A'..='Z' | 'a'..='z' => true,
+        '1'..='9' | 'A'..='H' | 'J'..='N' | 'P'..='Z' | 'a'..='k' | 'm'..='z' => true,
         _ => false,
     }
 }
@@ -34,9 +34,9 @@ pub fn estimate_pattern(pattern: &str, is_start: bool) -> PatternEstimate {
             invalid_chars.push(c);
         }
     }
-    
+
     let has_invalid_chars = !invalid_chars.is_empty();
-    
+
     // If there are invalid characters, the pattern is impossible to find
     if has_invalid_chars {
         return PatternEstimate {
@@ -47,7 +47,7 @@ pub fn estimate_pattern(pattern: &str, is_start: bool) -> PatternEstimate {
             invalid_chars,
         };
     }
-    
+
     let pattern_length = pattern.len() as f64;
 
     // Calculate the base number of attempts based on the matching location.
@@ -102,9 +102,9 @@ pub fn format_time(seconds: f64) -> String {
 /// This displays the pattern, the estimated attempts needed, and the time estimates for two different speeds.
 pub fn print_estimate(pattern: &str, is_start: bool) {
     let estimate = estimate_pattern(pattern, is_start);
-    
+
     println!("\nPattern: \"{}\"", pattern);
-    
+
     if estimate.has_invalid_chars {
         println!("WARNING: Pattern contains invalid Base58 characters:");
         println!("  Invalid characters: {}", estimate.invalid_chars.iter().collect::<String>());
@@ -119,7 +119,7 @@ pub fn print_estimate(pattern: &str, is_start: bool) {
 }
 
 /// Wrapper function that prints the estimate and difficulty header
-/// 
+///
 /// This is a convenience function called from main.rs
 pub fn estimate_and_print(pattern: &str, is_start: bool) {
     // Print header only for the first pattern

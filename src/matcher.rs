@@ -11,12 +11,25 @@ pub struct PatternMatcher {
 impl PatternMatcher {
     /// Create a new PatternMatcher.
     /// If case_sensitive is false, all patterns are converted to lowercase.
-    pub fn new(mut patterns: Vec<String>, case_sensitive: bool, start: bool, end: bool) -> Self {
-        if !case_sensitive {
-            patterns = patterns.into_iter().map(|p| p.to_lowercase()).collect();
+    pub fn new(patterns: Vec<String>, case_sensitive: bool, start: bool, end: bool) -> Self {
+        // Validate patterns BEFORE any case conversion
+        for pat in &patterns {
+            for (i, c) in pat.chars().enumerate() {
+                if !Self::is_base58_char(c) {
+                    panic!("Invalid character '{}' in pattern '{}' at position {}. Only Base58 characters are allowed: 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz", c, pat, i + 1);
+                }
+            }
         }
+
+        // Convert to lowercase if case insensitive
+        let final_patterns = if !case_sensitive {
+            patterns.into_iter().map(|p| p.to_lowercase()).collect()
+        } else {
+            patterns
+        };
+
         Self {
-            patterns,
+            patterns: final_patterns,
             case_sensitive,
             start,
             end,
@@ -26,10 +39,10 @@ impl PatternMatcher {
     /// Checks if a character is valid in the Base58 alphabet
     fn is_base58_char(c: char) -> bool {
         // Base58 alphabet: 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
-        // Excluded: 0, O, I, l
+        // Excluded: 0 (zero), O (uppercase o), I (uppercase i), l (lowercase L)
         match c {
             '0' | 'O' | 'I' | 'l' => false,
-            '1'..='9' | 'A'..='Z' | 'a'..='z' => true,
+            '1'..='9' | 'A'..='H' | 'J'..='N' | 'P'..='Z' | 'a'..='k' | 'm'..='z' => true,
             _ => false,
         }
     }
@@ -42,7 +55,7 @@ impl PatternMatcher {
             return Err("At least one pattern must be specified".to_string());
         }
 
-        // For "start" pattern, must be a valid second character
+        // For "start" pattern, must be a valid second character (check after case conversion)
         if self.start {
             for pat in &self.patterns {
                 if !pat.is_empty() {
@@ -54,18 +67,7 @@ impl PatternMatcher {
             }
         }
 
-        // Check all patterns for Base58 compliance
-        for pat in &self.patterns {
-            for (i, c) in pat.chars().enumerate() {
-                if !Self::is_base58_char(c) {
-                    return Err(format!(
-                        "Invalid character '{}' in pattern '{}' at position {}. Only Base58 characters are allowed: 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz", 
-                        c, pat, i + 1
-                    ));
-                }
-            }
-        }
-
+        // Note: Base58 validation is now done in the constructor before case conversion
         Ok(())
     }
 
