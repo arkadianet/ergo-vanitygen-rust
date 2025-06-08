@@ -38,15 +38,15 @@ pub struct VanityGenApp {
     num_results: usize,
     balanced: bool,
     current_tab: Tab,
-    
+
     // Add security options
     mask_seed_phrases: bool,
     show_security_warning: bool,
-    
+
     // Seed phrase unmasking
     show_unmasked_seed: bool,
     current_unmasked_seed: String,
-    
+
     // --- Results and Statistics ---
     results: Arc<Mutex<Vec<MatchResult>>>,
     logs: VecDeque<String>,
@@ -74,15 +74,15 @@ impl Default for VanityGenApp {
             num_results: 1,
             balanced: false,
             current_tab: Tab::Status,
-            
+
             // Initialize security options
             mask_seed_phrases: true,
             show_security_warning: true,
-            
+
             // Seed phrase unmasking
             show_unmasked_seed: false,
             current_unmasked_seed: String::new(),
-            
+
             results: Arc::new(Mutex::new(Vec::new())),
             logs: VecDeque::with_capacity(MAX_LOG_ENTRIES),
             stats: Arc::new(Mutex::new(None)),
@@ -96,6 +96,10 @@ impl Default for VanityGenApp {
 
 impl App for VanityGenApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
+        // Handle window close request
+        if ctx.input(|i| i.viewport().close_requested()) {
+            self.handle_window_close();
+        }
         // Request frequent updates for smooth animations
         ctx.request_repaint_after(Duration::from_millis(10));
         if *self.running.lock().unwrap() {
@@ -113,7 +117,7 @@ impl App for VanityGenApp {
         if result_count > 0 {
             LAST_LOGGED_COUNT.store(result_count, Ordering::Relaxed);
         }
-        
+
         // Show unmasked seed phrase modal when requested
         if self.show_unmasked_seed {
             egui::Window::new("⚠️ Unmasked Seed Phrase")
@@ -123,11 +127,11 @@ impl App for VanityGenApp {
                 .show(ctx, |ui| {
                     ui.label(RichText::new("⚠️ SENSITIVE DATA - Keep Safe").strong().size(16.0).color(Color32::RED));
                     ui.separator();
-                    
+
                     let text_style = egui::TextStyle::Monospace;
                     let row_height = ui.text_style_height(&text_style) * 1.5;
                     let seed_words: Vec<&str> = self.current_unmasked_seed.split_whitespace().collect();
-                    
+
                     egui::Grid::new("seed_phrase_grid")
                         .num_columns(2)
                         .spacing([10.0, 8.0])
@@ -137,25 +141,25 @@ impl App for VanityGenApp {
                             for (i, word) in seed_words.iter().enumerate() {
                                 ui.label(RichText::new(format!("{:2}.", i+1)).strong().color(Color32::LIGHT_YELLOW));
                                 ui.label(RichText::new(*word).monospace());
-                                
+
                                 if i % 2 == 1 {
                                     ui.end_row();
                                 }
                             }
-                            
+
                             // Handle odd number of words
                             if seed_words.len() % 2 == 1 {
                                 ui.end_row();
                             }
                         });
-                    
+
                     ui.add_space(15.0);
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                         if ui.button("Close").clicked() {
                             self.show_unmasked_seed = false;
                             self.current_unmasked_seed.clear();
                         }
-                        
+
                         ui.add_space(5.0);
                         ui.label("Close this window when done viewing");
                     });
@@ -174,13 +178,50 @@ impl App for VanityGenApp {
                 ui.add_space(10.0);
 
                 ui.label("Pattern(s) to find:");
-                // Use TextEdit widget with hint_text
-                ui.add(
-                    TextEdit::multiline(&mut self.input_patterns)
-                        .hint_text("e.g. ABC, 123")
-                );
+
+                let invalid_chars = self.validate_patterns();
+                let has_invalid = invalid_chars.is_some();
+
+                let text_edit = TextEdit::multiline(&mut self.input_patterns)
+                    .hint_text("e.g. ABC, 123");
+
+                let text_response = if has_invalid {
+                    let frame = egui::Frame::none()
+                        .stroke(egui::Stroke::new(2.0, Color32::from_rgb(220, 38, 38)))
+                        .inner_margin(egui::vec2(4.0, 4.0));
+                    frame.show(ui, |ui| {
+                        ui.add(text_edit)
+                    }).inner
+                } else {
+                    ui.add(text_edit)
+                };
+
+                if has_invalid {
+                    if let Some(invalid) = invalid_chars {
+                        text_response.on_hover_ui(|ui| {
+                            ui.colored_label(Color32::from_rgb(220, 38, 38), "❌ Invalid characters detected");
+
+                            // Show each invalid character with clear description
+                            for &c in &invalid {
+                                let description = match c {
+                                    '0' => "0 (zero)",
+                                    'O' => "O (uppercase O)",
+                                    'I' => "I (uppercase i)",
+                                    'l' => "l (lowercase L)",
+                                    _ => "invalid character",
+                                };
+                                ui.label(format!("• {} - {}", c, description));
+                            }
+
+                            ui.separator();
+                            ui.label("Valid characters:");
+                            ui.label("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz");
+                            ui.label("Excluded to avoid confusion between similar-looking characters");
+                        });
+                    }
+                }
                 ui.label("Comma-separated for multiple patterns");
-                
+
                 // Add Base58 info with subtle coloring
                 ui.label(
                     RichText::new("Note: Only Base58 characters are valid (no 0, O, I, l)")
@@ -191,7 +232,7 @@ impl App for VanityGenApp {
                     ui.label("Excluded characters: 0, O, I, l");
                     ui.label("These restrictions exist in the Ergo address format to prevent confusion between similar-looking characters.");
                 });
-                
+
                 ui.add_space(5.0);
 
                 ui.label("Match type:");
@@ -294,7 +335,7 @@ impl App for VanityGenApp {
                 {
                     for pattern in &patterns {
                         let estimate = estimator::estimate_pattern(pattern, self.start_match);
-                        
+
                         if estimate.has_invalid_chars {
                             self.add_log(&format!(
                                 "Pattern: \"{}\" contains invalid Base58 characters: {}",
@@ -317,7 +358,10 @@ impl App for VanityGenApp {
                 }
                 ui.add_space(10.0);
                 let is_running = *self.running.lock().unwrap();
-                if ui.add_enabled(!is_running && !patterns.is_empty(), egui::Button::new("Start Search").fill(Color32::from_rgb(0, 120, 0)))
+                let has_invalid = self.validate_patterns().is_some();
+                let can_start = !is_running && !patterns.is_empty() && !has_invalid;
+
+                if ui.add_enabled(can_start, egui::Button::new("Start Search").fill(Color32::from_rgb(0, 120, 0)))
                     .clicked()
                 {
                     self.start_search();
@@ -327,10 +371,10 @@ impl App for VanityGenApp {
                 {
                     self.stop_search();
                 }
-                
+
                 // Add spacer to push the donation button to the bottom
                 ui.add_space(ui.available_height() - 50.0);
-                
+
                 // Donation button at bottom of sidebar
                 ui.separator();
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
@@ -344,13 +388,13 @@ impl App for VanityGenApp {
                         .fill(Color32::from_rgb(80, 40, 40))
                         .rounding(8.0)
                     );
-                    
+
                     if donate_button.clicked() {
                         const DONATION_ADDRESS: &str = "9fMUoW2fVXzG8yBaGzaRNtWS8wcpNLJc6HCPrK6YFs6SkNDYryK";
                         ui.output_mut(|o| o.copied_text = DONATION_ADDRESS.to_string());
                         self.add_log("Donation address copied to clipboard");
                     }
-                    
+
                     if donate_button.hovered() {
                         egui::show_tooltip(ui.ctx(), egui::Id::new("donation_tooltip"), |ui| {
                             ui.label("Click to copy donation address");
@@ -408,6 +452,10 @@ impl App for VanityGenApp {
             }
         });
     }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.handle_window_close();
+    }
 }
 
 impl VanityGenApp {
@@ -422,29 +470,35 @@ impl VanityGenApp {
             self.add_log("No patterns specified");
             return;
         }
+
+        // Validate patterns first
+        if let Some(invalid_chars) = self.validate_patterns() {
+            let invalid_str: String = invalid_chars.iter().collect();
+            self.add_log(&format!("Error: Invalid characters in pattern: {}", invalid_str));
+            self.add_log("Valid characters: 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz");
+            self.add_log("Excluded characters: 0, O, I, l (to avoid confusion)");
+            self.current_tab = Tab::Log;
+            return;
+        }
+
         let matcher = PatternMatcher::new(patterns.clone(), self.case_sensitive, self.start_match, self.end_match);
+
+        // Validate matcher
         if let Err(err) = matcher.validate() {
             self.add_log(&format!("Error: {}", err));
-            
-            // Show error in a more prominent way if validation fails
-            self.current_tab = Tab::Log; // Switch to log tab to make error visible
-            
+            self.current_tab = Tab::Log;
+
             // Add specific messages based on error type
-            if err.contains("Base58") {
-                self.add_log("Invalid characters detected. Ergo addresses only use Base58 characters:");
-                self.add_log("  Valid characters: 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz");
-                self.add_log("  Excluded characters: 0, O, I, l (to avoid confusion)");
-                self.add_log("Your pattern contains characters that can never appear in an Ergo address.");
-            } else if self.start_match && patterns.iter().any(|p| {
+            if self.start_match && patterns.iter().any(|p| {
                 let first_char = p.chars().next().unwrap_or('_');
                 !['e', 'f', 'g', 'h', 'i'].contains(&first_char)
             }) {
                 self.add_log("Invalid start pattern: Ergo addresses can only start with e, f, g, h, or i");
                 self.add_log("Try 'Anywhere' or 'End' matching instead for this pattern");
             }
-            
             return;
         }
+
         let word_count = if self.all_word_lengths {
             0 // Use random seed length (12/15/24)
         } else if self.twelve_words {
@@ -558,20 +612,18 @@ impl VanityGenApp {
     /// Stops the search.
     fn stop_search(&mut self) {
         *self.running.lock().unwrap() = false;
-        
-        // Clone processor to avoid borrow issues
+
         let processor_clone = self.processor.clone();
-        
+
         if let Some(processor) = processor_clone {
             processor.cancel();
-            // Log must happen before reset due to borrow checker
-            self.add_log("Search is being cancelled...");
+            std::thread::sleep(std::time::Duration::from_millis(50));
             processor.reset();
+            self.add_log("Search cancelled");
         } else {
             self.add_log("No active search to cancel");
         }
-        
-        // Reset promise but keep the processor
+
         self.promise = None;
     }
 
@@ -782,17 +834,17 @@ impl VanityGenApp {
     fn show_results(&mut self, ui: &mut Ui) {
         ui.heading(RichText::new("Found Matches").size(24.0).color(Color32::WHITE));
         ui.add_space(8.0);
-        
+
         // Add security options
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.mask_seed_phrases, "Mask seed phrases")
                 .on_hover_text("Hide seed phrases for security");
-            
+
             if ui.button("Security Tips").clicked() {
                 self.show_security_warning = true;
             }
         });
-        
+
         // Security warning popup
         if self.show_security_warning {
             egui::Window::new("⚠️ Security Warning")
@@ -816,7 +868,7 @@ impl VanityGenApp {
                     }
                 });
         }
-        
+
         let results = self.results.lock().unwrap().clone();
         ui.label(RichText::new(format!("Total matches found: {}", results.len())).strong());
         ui.add_space(4.0);
@@ -863,13 +915,13 @@ impl VanityGenApp {
                         ui.horizontal(|ui| {
                             ui.strong(format!("Seed phrase ({}-word):", word_count));
                         });
-                        
+
                         // Show masked or unmasked seed phrase based on user preference
                         if self.mask_seed_phrases {
                             ui.horizontal(|ui| {
                                 let masked_seed = self.mask_sensitive_data(mnemonic);
                                 ui.label(RichText::new(masked_seed).monospace().color(Color32::LIGHT_YELLOW));
-                                
+
                                 if ui.small_button("👁 Show").clicked() {
                                     // Set the current seed to be shown in a modal
                                     self.show_unmasked_seed = true;
@@ -881,12 +933,12 @@ impl VanityGenApp {
                                 ui.label(RichText::new(mnemonic).monospace().color(Color32::LIGHT_YELLOW));
                             });
                         }
-                        
+
                         ui.horizontal(|ui| {
                             if ui.small_button("📋 Copy seed").clicked() {
                                 ui.output_mut(|o| o.copied_text = mnemonic.clone());
                                 self.add_log("Seed phrase copied to clipboard - clear clipboard when done!");
-                                
+
                                 // Prompt user to clear clipboard after 60 seconds
                                 let ctx = ui.ctx().clone();
                                 std::thread::spawn(move || {
@@ -894,7 +946,7 @@ impl VanityGenApp {
                                     ctx.request_repaint(); // Request repaint to show the notification
                                 });
                             }
-                            
+
                             // Add paper wallet generation button
                             if ui.small_button("📄 Generate Paper Wallet").clicked() {
                                 let paper_wallet_info = PaperWalletInfo {
@@ -903,7 +955,7 @@ impl VanityGenApp {
                                     word_count: *word_count,
                                     position: *position,
                                 };
-                                
+
                                 self.generate_paper_wallet(paper_wallet_info);
                             }
                         });
@@ -913,7 +965,7 @@ impl VanityGenApp {
             });
         }
     }
-    
+
     /// Generate a paper wallet HTML and prompt user to save it
     fn generate_paper_wallet(&mut self, info: PaperWalletInfo) {
         // Open a save file dialog
@@ -928,7 +980,7 @@ impl VanityGenApp {
                     match crate::paper_wallet::generate_paper_wallet(&info, &path, None) {
                         Ok(_) => {
                             self.add_log(&format!("Paper wallet saved to {}", path.display()));
-                            
+
                             // Try to open the HTML file in the default browser
                             #[cfg(target_os = "windows")]
                             {
@@ -936,16 +988,16 @@ impl VanityGenApp {
                                     .args(&["/C", "start", "", path.to_str().unwrap_or("")])
                                     .spawn();
                             }
-                            
+
                             #[cfg(target_os = "linux")]
                             {
                                 let _ = std::process::Command::new("xdg-open")
                                     .arg(&path)
                                     .spawn();
-                                
+
                                 self.add_log("Opening paper wallet in your browser...");
                             }
-                            
+
                             #[cfg(target_os = "macos")]
                             {
                                 let _ = std::process::Command::new("open")
@@ -1006,16 +1058,16 @@ impl VanityGenApp {
         });
     }
 
-    // Add a new helper function to mask sensitive data
+    /// Add a new helper function to mask sensitive data
     fn mask_sensitive_data(&self, data: &str) -> String {
         let words: Vec<&str> = data.split_whitespace().collect();
         let mut masked = String::new();
-        
+
         for (i, word) in words.iter().enumerate() {
             if i > 0 {
                 masked.push(' ');
             }
-            
+
             if word.len() <= 2 {
                 masked.push_str(word);
             } else {
@@ -1028,8 +1080,56 @@ impl VanityGenApp {
                 masked.push(last);
             }
         }
-        
+
         masked
+    }
+
+    /// Handle window close event
+    fn handle_window_close(&mut self) {
+        if *self.running.lock().unwrap() {
+            self.add_log("Window closing - stopping search...");
+            self.stop_search();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        if let Some(processor) = &self.processor {
+            processor.cancel();
+        }
+        self.promise = None;
+    }
+
+    /// Validates input patterns and returns invalid characters if any
+    fn validate_patterns(&self) -> Option<Vec<char>> {
+        let patterns: Vec<String> = self.input_patterns
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let mut invalid_chars = Vec::new();
+
+        for pattern in patterns {
+            for c in pattern.chars() {
+                if !self.is_base58_char(c) && !invalid_chars.contains(&c) {
+                    invalid_chars.push(c);
+                }
+            }
+        }
+
+        if invalid_chars.is_empty() {
+            None
+        } else {
+            Some(invalid_chars)
+        }
+    }
+
+    /// Check if character is valid Base58
+    fn is_base58_char(&self, c: char) -> bool {
+        match c {
+            '0' | 'O' | 'I' | 'l' => false,
+            '1'..='9' | 'A'..='H' | 'J'..='N' | 'P'..='Z' | 'a'..='k' | 'm'..='z' => true,
+            _ => false,
+        }
     }
 }
 

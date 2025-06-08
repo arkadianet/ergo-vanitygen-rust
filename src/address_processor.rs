@@ -150,15 +150,20 @@ impl AddressProcessor {
     pub fn cancel(&self) {
         self.should_cancel.store(true, Ordering::SeqCst);
         self.progress.stop();
+        *self.result_callback.lock().unwrap() = None;
         println!("Cancellation requested — stopping search.");
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
     
     /// Reset the processor for a fresh search
     pub fn reset(&self) {
+        self.should_cancel.store(true, Ordering::SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(100));
         self.should_cancel.store(false, Ordering::SeqCst);
         self.batch_counter.store(0, Ordering::Relaxed);
         self.performance_metrics.lock().unwrap().clear();
         self.progress.reset();
+        *self.result_callback.lock().unwrap() = None;
     }
     
     /// Internal check for cancellation
@@ -230,6 +235,9 @@ impl AddressProcessor {
 
         // Keep generating in parallel "batches" until we have enough or are cancelled
         while found_count.load(Ordering::SeqCst) < num_results && !self.is_cancelled() {
+            if self.is_cancelled() {
+                break;
+            }
             let batch_num = self.batch_counter.fetch_add(1, Ordering::Relaxed);
             let current_batch_size = self.batch_size.load(Ordering::Relaxed);
 
@@ -364,6 +372,9 @@ impl AddressProcessor {
 
         // Generate seed batches in parallel until we have enough matches
         while found_count.load(Ordering::SeqCst) < num_results && !self.is_cancelled() {
+            if self.is_cancelled() {
+                break;
+            }
             let batch_num = self.batch_counter.fetch_add(1, Ordering::Relaxed);
             let current_batch_size = self.batch_size.load(Ordering::Relaxed);
 

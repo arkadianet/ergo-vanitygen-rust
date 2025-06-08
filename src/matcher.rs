@@ -12,14 +12,7 @@ impl PatternMatcher {
     /// Create a new PatternMatcher.
     /// If case_sensitive is false, all patterns are converted to lowercase.
     pub fn new(patterns: Vec<String>, case_sensitive: bool, start: bool, end: bool) -> Self {
-        // Validate patterns BEFORE any case conversion
-        for pat in &patterns {
-            for (i, c) in pat.chars().enumerate() {
-                if !Self::is_base58_char(c) {
-                    panic!("Invalid character '{}' in pattern '{}' at position {}. Only Base58 characters are allowed: 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz", c, pat, i + 1);
-                }
-            }
-        }
+        // Patterns will be validated in the GUI, no validation here for real-time checking
 
         // Convert to lowercase if case insensitive
         let final_patterns = if !case_sensitive {
@@ -33,17 +26,6 @@ impl PatternMatcher {
             case_sensitive,
             start,
             end,
-        }
-    }
-
-    /// Checks if a character is valid in the Base58 alphabet
-    fn is_base58_char(c: char) -> bool {
-        // Base58 alphabet: 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
-        // Excluded: 0 (zero), O (uppercase o), I (uppercase i), l (lowercase L)
-        match c {
-            '0' | 'O' | 'I' | 'l' => false,
-            '1'..='9' | 'A'..='H' | 'J'..='N' | 'P'..='Z' | 'a'..='k' | 'm'..='z' => true,
-            _ => false,
         }
     }
 
